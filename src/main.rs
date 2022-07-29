@@ -1,28 +1,8 @@
+mod process;
+
 use actix_web::{main, post, web, App, HttpResponse, HttpServer, Responder};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-enum CustomField {
-    HashMapString(std::collections::HashMap<String, Value>),
-    String(String),
-}
-
-#[derive(Serialize, Deserialize)]
-struct Line {
-    quantity: i64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Activity {
-    id: i64,
-    name: String,
-    custom_field: CustomField,
-    custom_field2: CustomField,
-    created_at: String,
-    lines: Vec<Line>,
-}
+use crate::process::Activity;
 
 #[main]
 async fn main() -> std::io::Result<()> {
@@ -47,24 +27,29 @@ mod tests {
     use actix_web::{body::to_bytes, dev::Service, http, test, web, App};
 
     use super::*;
+    use crate::process::{Activity, CustomField, Line};
 
     #[actix_web::test]
     async fn test_realtime() {
         let app = test::init_service(App::new().service(echo)).await;
 
-        let mut json_custom_field: HashMap<String, Value> = HashMap::new();
-        json_custom_field.insert("test".to_string(), Value::Bool(true));
+        let mut json_custom_field: HashMap<String, serde_json::Value> = HashMap::new();
+        json_custom_field.insert("test".to_string(), serde_json::Value::Bool(true));
+
+        let activity: Activity = Activity::new(
+            123,
+            "
+            test"
+                .to_string(),
+            CustomField::HashMapString(json_custom_field),
+            CustomField::String("test".to_string()),
+            "2022-07-12T10:00:00Z".to_string(),
+            vec![Line::new(1), Line::new(1)],
+        );
 
         let req = test::TestRequest::post()
             .uri("/realtime")
-            .set_json(&Activity {
-                id: 123,
-                name: "test".to_string(),
-                custom_field: CustomField::HashMapString(json_custom_field),
-                custom_field2: CustomField::String("test".to_string()),
-                created_at: "2022-07-12T10:00:00Z".to_string(),
-                lines: vec![Line { quantity: 1 }, Line { quantity: 3 }],
-            })
+            .set_json(&activity)
             .to_request();
 
         let resp = app.call(req).await.unwrap();
@@ -72,6 +57,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let body_bytes = to_bytes(resp.into_body()).await.unwrap();
+
         let expected_body =
             b"activity processed: 123 with custom field: HashMapString({\"test\": Bool(true)})";
 
